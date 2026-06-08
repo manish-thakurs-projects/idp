@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Smart Fuel Monitor</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            background: #0a2f2f;
+            margin: 0;
+            padding: 16px;
+            color: #e0f2f1;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #1e4a4a;
+            border-radius: 24px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 1.8rem;
+            text-align: center;
+        }
+        .sub {
+            text-align: center;
+            color: #b2dfdb;
+            margin-bottom: 20px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin: 16px 0;
+        }
+        .stat {
+            background: #0d3b3b;
+            border-radius: 20px;
+            padding: 12px;
+            text-align: center;
+        }
+        .stat-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #80cbc4;
+        }
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            word-break: break-word;
+        }
+        .alert-box {
+            background: #b91c1c;
+            border-radius: 16px;
+            padding: 12px;
+            margin-top: 16px;
+            font-weight: bold;
+            text-align: center;
+            display: none;
+        }
+        button {
+            background: #2e7d64;
+            border: none;
+            color: white;
+            font-size: 1rem;
+            padding: 12px 20px;
+            border-radius: 40px;
+            width: 100%;
+            margin-top: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:active {
+            transform: scale(0.97);
+            background: #1f5e4b;
+        }
+        .switch {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0d3b3b;
+            padding: 12px 16px;
+            border-radius: 40px;
+            margin-top: 12px;
+        }
+        .toggle {
+            width: 52px;
+            height: 28px;
+            background: #5f5f5f;
+            border-radius: 28px;
+            position: relative;
+            transition: 0.2s;
+            cursor: pointer;
+        }
+        .toggle.active {
+            background: #2e7d64;
+        }
+        .toggle::after {
+            content: "";
+            width: 24px;
+            height: 24px;
+            background: white;
+            border-radius: 24px;
+            position: absolute;
+            top: 2px;
+            left: 3px;
+            transition: 0.2s;
+        }
+        .toggle.active::after {
+            left: 25px;
+        }
+        .status {
+            font-size: 0.8rem;
+            text-align: center;
+            margin-top: 12px;
+        }
+        .footer {
+            text-align: center;
+            font-size: 0.7rem;
+            color: #80cbc4;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h1>⛽ Smart Fuel Monitor</h1>
+        <div class="sub">Real-time efficiency & anomaly detection</div>
+
+        <div class="stats-grid">
+            <div class="stat">
+                <div class="stat-label">Mileage</div>
+                <div class="stat-value" id="mileage">-- km/L</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Fuel Used</div>
+                <div class="stat-value" id="fuelUsed">-- L</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Distance</div>
+                <div class="stat-value" id="distance">-- km</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Trip Cost</div>
+                <div class="stat-value" id="tripCost">-- ₹</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Flow Rate</div>
+                <div class="stat-value" id="flowRate">-- L/min</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Fuel Price</div>
+                <div class="stat-value" id="fuelPrice">-- ₹/L</div>
+            </div>
+        </div>
+
+        <div id="alertBox" class="alert-box">⚠️ Alert will appear here</div>
+
+        <button id="connectBtn">🔌 Connect WebSocket</button>
+        
+        <div class="switch">
+            <span>📍 Send GPS to ESP32</span>
+            <div id="gpsToggle" class="toggle"></div>
+        </div>
+        <div class="status" id="statusMsg">Not connected</div>
+    </div>
+    <div class="footer">
+        ESP32 Wi‑Fi AP: SmartFuelMonitor | pwd: 12345678
+    </div>
+</div>
+
+<script>
+    // ----- DOM elements -----
+    const mileageEl = document.getElementById('mileage');
+    const fuelUsedEl = document.getElementById('fuelUsed');
+    const distanceEl = document.getElementById('distance');
+    const tripCostEl = document.getElementById('tripCost');
+    const flowRateEl = document.getElementById('flowRate');
+    const fuelPriceEl = document.getElementById('fuelPrice');
+    const alertBox = document.getElementById('alertBox');
+    const connectBtn = document.getElementById('connectBtn');
+    const gpsToggle = document.getElementById('gpsToggle');
+    const statusMsg = document.getElementById('statusMsg');
+
+    // ----- State -----
+    let ws = null;
+    let gpsEnabled = false;
+    let watchId = null;
+
+    // ----- WebSocket connection -----
+    function connectWebSocket() {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+            ws.close();
+        }
+        // ESP32 AP default IP
+        ws = new WebSocket('ws://192.168.4.1:81');
+        
+        ws.onopen = () => {
+            statusMsg.innerText = '✅ Connected to ESP32';
+            statusMsg.style.color = '#b9f6ca';
+            connectBtn.innerText = '🔌 Disconnect';
+        };
+        
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                // If it's an alert (string starting with ALERT)
+                if (typeof data === 'string' && data.startsWith('ALERT')) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerText = data;
+                    setTimeout(() => { alertBox.style.display = 'none'; }, 8000);
+                } else {
+                    // Telemetry JSON
+                    if (data.mileage !== undefined) mileageEl.innerText = data.mileage.toFixed(2) + ' km/L';
+                    if (data.fuelUsed !== undefined) fuelUsedEl.innerText = data.fuelUsed.toFixed(2) + ' L';
+                    if (data.distance !== undefined) distanceEl.innerText = data.distance.toFixed(2) + ' km';
+                    if (data.tripCost !== undefined) tripCostEl.innerText = '₹' + data.tripCost.toFixed(2);
+                    if (data.flowRate !== undefined) flowRateEl.innerText = data.flowRate.toFixed(2) + ' L/min';
+                    if (data.fuelPrice !== undefined) fuelPriceEl.innerText = '₹' + data.fuelPrice.toFixed(2);
+                }
+            } catch(e) {
+                // If not JSON, maybe plain text alert
+                if (event.data.startsWith('ALERT')) {
+                    alertBox.style.display = 'block';
+                    alertBox.innerText = event.data;
+                    setTimeout(() => { alertBox.style.display = 'none'; }, 8000);
+                }
+            }
+        };
+        
+        ws.onerror = () => {
+            statusMsg.innerText = '❌ Connection error';
+            statusMsg.style.color = '#ffcdd2';
+        };
+        
+        ws.onclose = () => {
+            statusMsg.innerText = '🔴 Disconnected';
+            statusMsg.style.color = '#ffcdd2';
+            connectBtn.innerText = '🔌 Connect WebSocket';
+            if (gpsEnabled) toggleGPS(false);
+        };
+    }
+    
+    function disconnectWebSocket() {
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+    }
+    
+    // ----- GPS Handling -----
+    function startGPS() {
+        if (!navigator.geolocation) {
+            statusMsg.innerText = '❌ GPS not supported';
+            return;
+        }
+        watchId = navigator.geolocation.watchPosition(
+            (position) => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    const gpsData = JSON.stringify({ lat: lat, lng: lng });
+                    ws.send(gpsData);
+                }
+            },
+            (error) => {
+                console.error('GPS error', error);
+                statusMsg.innerText = '⚠️ GPS error: ' + error.message;
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 2000,
+                timeout: 5000
+            }
+        );
+    }
+    
+    function stopGPS() {
+        if (watchId !== null) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+        }
+    }
+    
+    function toggleGPS(enable) {
+        gpsEnabled = enable;
+        if (enable) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                startGPS();
+                gpsToggle.classList.add('active');
+            } else {
+                statusMsg.innerText = '⚠️ Connect to ESP32 first';
+                gpsEnabled = false;
+                gpsToggle.classList.remove('active');
+            }
+        } else {
+            stopGPS();
+            gpsToggle.classList.remove('active');
+        }
+    }
+    
+    // ----- UI Events -----
+    connectBtn.addEventListener('click', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            disconnectWebSocket();
+            if (gpsEnabled) toggleGPS(false);
+        } else {
+            connectWebSocket();
+        }
+    });
+    
+    gpsToggle.addEventListener('click', () => {
+        if (!gpsEnabled) {
+            toggleGPS(true);
+        } else {
+            toggleGPS(false);
+        }
+    });
+    
+    // Auto connect on page load (optional)
+    window.addEventListener('load', () => {
+        // Try to connect automatically
+        connectWebSocket();
+    });
+</script>
+</body>
+</html>
